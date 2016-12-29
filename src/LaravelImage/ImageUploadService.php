@@ -2,11 +2,13 @@
 
 namespace AnkitPokhrel\LaravelImage;
 
+
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Input;
 use Illuminate\Support\Facades\Validator;
 
 /**
- * Handles all image upload operation.
+ * Handles all image upload operation
  *
  * @author Ankit Pokhrel
  */
@@ -41,6 +43,8 @@ class ImageUploadService
 
     /** @var array|object Validation errors */
     protected $errors = [];
+
+    protected $extension;
 
     /**
      * @constructor
@@ -134,7 +138,7 @@ class ImageUploadService
      */
     public function setBasePath($path, $publicPath = true)
     {
-        $this->basePath   = $path;
+        $this->basePath = $path;
         $this->publicPath = $publicPath;
     }
 
@@ -163,7 +167,8 @@ class ImageUploadService
      */
     public function setUploadFolder($folder)
     {
-        $this->uploadPath  = $this->basePath . $folder . '/' . $this->getUniqueFolderName() . '/';
+        $this->uploadPath = $this->basePath . $folder . '/' . $this->getUniqueFolderName() . '/';
+
         $this->destination = $this->publicPath ? public_path($this->uploadPath) : $this->uploadPath;
     }
 
@@ -178,7 +183,7 @@ class ImageUploadService
     }
 
     /**
-     * Get upload path.
+     * Get upload path
      *
      * @return string
      */
@@ -212,16 +217,19 @@ class ImageUploadService
      */
     protected function validate($file)
     {
-        // Check if file is valid
-        if ( ! $file->isValid()) {
+
+        // Check if file is valid OR an Intervention Image
+        if (!$file->mime()) {
             return false;
         }
 
         $inputFile = [$this->field => $file];
-        $rules     = [$this->field => $this->validationRules];
+        $rules = [$this->field => $this->validationRules];
+
 
         // Validate
         $validator = Validator::make($inputFile, $rules);
+
         if ($validator->fails()) {
             $this->errors = $validator;
 
@@ -234,28 +242,31 @@ class ImageUploadService
     /**
      * Uploads file to required destination.
      *
+     * @param \Intervention\Image\Image $file
      * @return bool
      */
-    public function upload()
+    public function upload($file)
     {
-        $file = Input::file($this->field);
-        if ( ! $this->validate($file)) {
+
+        if (!$this->validate($file)) {
             return false;
         }
 
-        $originalFileName  = $file->getClientOriginalName();
-        $encryptedFileName = $this->getUniqueFilename($originalFileName);
-        $mimeType          = $file->getMimeType();
+        /*TODO get this out of here*/
+        $originalFileName = Input::get('name');
 
-        $size = $file->getSize();
-        if ($file->move($this->getDestination(), $encryptedFileName)) {
+        $encryptedFileName = $this->getUniqueFilename($originalFileName);
+
+        File::makeDirectory($this->destination, 0777, true);
+        
+        if ($file->save($this->getDestination() . $encryptedFileName)) {
             $this->uploadedFileInfo = [
                 $this->originalImageNameField => $originalFileName,
-                $this->field                  => $encryptedFileName,
-                $this->uploadDir              => $this->getUploadPath(),
-                'size'                        => $size,
-                'extension'                   => $file->getClientOriginalExtension(),
-                'mime_type'                   => $mimeType,
+                $this->field => $encryptedFileName,
+                $this->uploadDir => $this->getUploadPath(),
+                'size' => $file->filesize(),
+                'extension' => $this->extension,
+                'mime_type' => $file->mime(),
             ];
 
             return true;
@@ -275,14 +286,14 @@ class ImageUploadService
     /**
      * Clear out a folder and its content.
      *
-     * @param string $folder          Absolute path to the folder
-     * @param bool   $removeDirectory If you want to remove the folder as well
+     * @param string $folder Absolute path to the folder
+     * @param bool $removeDirectory If you want to remove the folder as well
      *
      * @throws \Exception
      */
     public function clean($folder, $removeDirectory = false)
     {
-        if ( ! is_dir($folder)) {
+        if (!is_dir($folder)) {
             throw new \Exception(('Not a folder.'));
         }
 
@@ -302,9 +313,11 @@ class ImageUploadService
     public function getUniqueFilename($filename)
     {
         $uniqueName = uniqid();
-        $fileExt    = explode('.', $filename);
-        $mimeType   = end($fileExt);
-        $filename   = $uniqueName . '.' . $mimeType;
+        $fileExt = explode('/', $this->extension);
+        $extension = end($fileExt);
+        $this->extension = $extension;
+
+        $filename = $uniqueName . '.' . $extension;
 
         return $filename;
     }
