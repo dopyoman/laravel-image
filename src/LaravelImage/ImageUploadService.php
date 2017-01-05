@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\Validator;
  *
  * @author Ankit Pokhrel
  */
-class ImageUploadService
-{
+class ImageUploadService {
+
     /** @var string Image field */
     protected $field = 'image';
 
@@ -61,6 +61,42 @@ class ImageUploadService
     }
 
     /**
+     * Set upload folder.
+     *
+     * @param $folder
+     */
+    public function setUploadFolder($folder)
+    {
+        $this->uploadPath = $this->basePath . $folder . '/' . $this->getUniqueFolderName() . '/';
+
+        $this->destination = $this->publicPath ? public_path($this->uploadPath) : $this->uploadPath;
+    }
+
+    /**
+     * Generate a random UUID for folder name (version 4).
+     *
+     * @see http://www.ietf.org/rfc/rfc4122.txt
+     *
+     * @return string RFC 4122 UUID
+     *
+     * @copyright Matt Farina MIT License https://github.com/lootils/uuid/blob/master/LICENSE
+     */
+    public function getUniqueFolderName()
+    {
+        return sprintf(
+            '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+            mt_rand(0, 65535),
+            mt_rand(0, 65535),
+            mt_rand(0, 65535),
+            mt_rand(0, 4095) | 0x4000,
+            mt_rand(0, 0x3fff) | 0x8000,
+            mt_rand(0, 65535),
+            mt_rand(0, 65535),
+            mt_rand(0, 65535)
+        );
+    }
+
+    /**
      * Get uploaded file info.
      *
      * @return array
@@ -91,6 +127,16 @@ class ImageUploadService
     }
 
     /**
+     * get upload directory.
+     *
+     * return string
+     */
+    public function getUploadDir()
+    {
+        return $this->uploadDir;
+    }
+
+    /**
      * Set upload directory.
      *
      * @param string $dir
@@ -101,13 +147,13 @@ class ImageUploadService
     }
 
     /**
-     * get upload directory.
+     * get original image name field.
      *
      * return string
      */
-    public function getUploadDir()
+    public function getOriginalImageNameField()
     {
-        return $this->uploadDir;
+        return $this->originalImageNameField;
     }
 
     /**
@@ -121,13 +167,13 @@ class ImageUploadService
     }
 
     /**
-     * get original image name field.
+     * Get base path.
      *
-     * return string
+     * @return string
      */
-    public function getOriginalImageNameField()
+    public function getBasePath()
     {
-        return $this->originalImageNameField;
+        return $this->basePath;
     }
 
     /**
@@ -143,16 +189,6 @@ class ImageUploadService
     }
 
     /**
-     * Get base path.
-     *
-     * @return string
-     */
-    public function getBasePath()
-    {
-        return $this->basePath;
-    }
-
-    /**
      * Get public path.
      */
     public function getPublicPath()
@@ -161,15 +197,112 @@ class ImageUploadService
     }
 
     /**
-     * Set upload folder.
-     *
-     * @param $folder
+     * Get validation rules.
      */
-    public function setUploadFolder($folder)
+    public function getValidationRules()
     {
-        $this->uploadPath = $this->basePath . $folder . '/' . $this->getUniqueFolderName() . '/';
+        return $this->validationRules;
+    }
 
-        $this->destination = $this->publicPath ? public_path($this->uploadPath) : $this->uploadPath;
+    /**
+     * @param $rules
+     */
+    public function setValidationRules($rules)
+    {
+        $this->validationRules = $rules;
+    }
+
+    /**
+     * Uploads file to required destination.
+     *
+     * @param \Intervention\Image\Image $file
+     *
+     * @return bool
+     */
+    public function upload($file)
+    {
+
+        if ( ! $this->validate($file))
+        {
+            return false;
+        }
+
+        /*TODO get this out of here*/
+        $originalFileName = Input::get('name') ?? 'default';
+
+        $this->extension = $file->mime();
+
+        $encryptedFileName = $this->getUniqueFilename($originalFileName);
+
+        File::makeDirectory($this->destination, 0777, true);
+
+        if ($file->save($this->getDestination() . $encryptedFileName))
+        {
+            $this->uploadedFileInfo = [
+                $this->originalImageNameField => $originalFileName,
+                $this->field                  => $encryptedFileName,
+                $this->uploadDir              => $this->getUploadPath(),
+                'size'                        => $file->filesize(),
+                'extension'                   => $this->extension,
+                'mime_type'                   => $file->mime(),
+            ];
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Perform image validation.
+     *
+     * @param $file
+     *
+     * @return bool
+     */
+    protected function validate($file)
+    {
+
+        // Check if file is valid OR an Intervention Image
+        if ( ! $file->mime())
+        {
+            return false;
+        }
+
+        $inputFile = [$this->field => $file];
+        $rules = [$this->field => $this->validationRules];
+
+
+        // Validate
+        $validator = Validator::make($inputFile, $rules);
+
+        if ($validator->fails())
+        {
+            $this->errors = $validator;
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * function to generate unique filename for images.
+     *
+     * @param string $filename
+     *
+     * @return string
+     */
+    public function getUniqueFilename($filename)
+    {
+        $uniqueName = uniqid();
+        $fileExt = explode('/', $this->extension);
+        $extension = end($fileExt);
+        $this->extension = $extension;
+
+        $filename = $uniqueName . '.' . $extension;
+
+        return $filename;
     }
 
     /**
@@ -193,89 +326,6 @@ class ImageUploadService
     }
 
     /**
-     * @param $rules
-     */
-    public function setValidationRules($rules)
-    {
-        $this->validationRules = $rules;
-    }
-
-    /**
-     * Get validation rules.
-     */
-    public function getValidationRules()
-    {
-        return $this->validationRules;
-    }
-
-    /**
-     * Perform image validation.
-     *
-     * @param $file
-     *
-     * @return bool
-     */
-    protected function validate($file)
-    {
-
-        // Check if file is valid OR an Intervention Image
-        if (!$file->mime()) {
-            return false;
-        }
-
-        $inputFile = [$this->field => $file];
-        $rules = [$this->field => $this->validationRules];
-
-
-        // Validate
-        $validator = Validator::make($inputFile, $rules);
-
-        if ($validator->fails()) {
-            $this->errors = $validator;
-
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Uploads file to required destination.
-     *
-     * @param \Intervention\Image\Image $file
-     * @return bool
-     */
-    public function upload($file)
-    {
-
-        if (!$this->validate($file)) {
-            return false;
-        }
-
-        /*TODO get this out of here*/
-        $originalFileName = Input::get('name');
-
-        $encryptedFileName = $this->getUniqueFilename($originalFileName);
-
-        File::makeDirectory($this->destination, 0777, true);
-        
-        if ($file->save($this->getDestination() . $encryptedFileName)) {
-            $this->uploadedFileInfo = [
-                $this->originalImageNameField => $originalFileName,
-                $this->field => $encryptedFileName,
-                $this->uploadDir => $this->getUploadPath(),
-                'size' => $file->filesize(),
-                'extension' => $this->extension,
-                'mime_type' => $file->mime(),
-            ];
-
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
      * @return array|object
      */
     public function getValidationErrors()
@@ -287,62 +337,21 @@ class ImageUploadService
      * Clear out a folder and its content.
      *
      * @param string $folder Absolute path to the folder
-     * @param bool $removeDirectory If you want to remove the folder as well
+     * @param bool   $removeDirectory If you want to remove the folder as well
      *
      * @throws \Exception
      */
     public function clean($folder, $removeDirectory = false)
     {
-        if (!is_dir($folder)) {
+        if ( ! is_dir($folder))
+        {
             throw new \Exception(('Not a folder.'));
         }
 
         array_map('unlink', glob($folder . DIRECTORY_SEPARATOR . '*'));
-        if ($removeDirectory && file_exists($folder)) {
+        if ($removeDirectory && file_exists($folder))
+        {
             rmdir($folder);
         }
-    }
-
-    /**
-     * function to generate unique filename for images.
-     *
-     * @param string $filename
-     *
-     * @return string
-     */
-    public function getUniqueFilename($filename)
-    {
-        $uniqueName = uniqid();
-        $fileExt = explode('/', $this->extension);
-        $extension = end($fileExt);
-        $this->extension = $extension;
-
-        $filename = $uniqueName . '.' . $extension;
-
-        return $filename;
-    }
-
-    /**
-     * Generate a random UUID for folder name (version 4).
-     *
-     * @see http://www.ietf.org/rfc/rfc4122.txt
-     *
-     * @return string RFC 4122 UUID
-     *
-     * @copyright Matt Farina MIT License https://github.com/lootils/uuid/blob/master/LICENSE
-     */
-    public function getUniqueFolderName()
-    {
-        return sprintf(
-            '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-            mt_rand(0, 65535),
-            mt_rand(0, 65535),
-            mt_rand(0, 65535),
-            mt_rand(0, 4095) | 0x4000,
-            mt_rand(0, 0x3fff) | 0x8000,
-            mt_rand(0, 65535),
-            mt_rand(0, 65535),
-            mt_rand(0, 65535)
-        );
     }
 }
